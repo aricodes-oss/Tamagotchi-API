@@ -1,0 +1,103 @@
+<html>
+    <body>
+        <canvas id="canvas" width="320" height="160"></canvas>
+        <br>
+        <button type="button" id="leftBtn">A</button>
+        <button type="button" id="midBtn">B</button>
+        <button type="button" id="rightBtn">C</button>
+
+        
+        <script src="hal_example.js"></script>
+        <script src="hw.js"></script>
+        <script src="tamalib.js"></script>
+        <script src="cpu.js"></script>
+        <script src="rom.js"></script>
+        
+        <script>
+            let STEPS_PER_DELAY   = 30;
+            const COPY_STEPS_PER_DELAY = STEPS_PER_DELAY;
+            
+            const canvas            = document.getElementById("canvas");
+            const ctx               = canvas.getContext("2d");
+            
+            const leftBtn           = document.getElementById("leftBtn");
+            const midBtn            = document.getElementById("midBtn");
+            const rightBtn          = document.getElementById("rightBtn");
+            
+            leftBtn.onmousedown     = () => {tamalib_set_button(button_t.BTN_LEFT, btn_state_t.BTN_STATE_PRESSED);};
+            midBtn.onmousedown      = () => {tamalib_set_button(button_t.BTN_MIDDLE, btn_state_t.BTN_STATE_PRESSED)};
+            rightBtn.onmousedown    = () => {tamalib_set_button(button_t.BTN_RIGHT, btn_state_t.BTN_STATE_PRESSED);};
+                                             
+            leftBtn.onmouseup       = () => {tamalib_set_button(button_t.BTN_LEFT, btn_state_t.BTN_STATE_RELEASED);};
+            midBtn.onmouseup        = () => {tamalib_set_button(button_t.BTN_MIDDLE, btn_state_t.BTN_STATE_RELEASED);};
+            rightBtn.onmouseup      = () => {tamalib_set_button(button_t.BTN_RIGHT, btn_state_t.BTN_STATE_RELEASED);};
+
+            document.onkeydown = function (e) {
+                e = e || window.event;
+                // use e.keyCode
+                if (e.keyCode == 37) //left arrow
+                {
+                    tamalib_set_button(button_t.BTN_LEFT, btn_state_t.BTN_STATE_PRESSED);
+                }
+                else if (e.keyCode == 40) //down arrow
+                {
+                    tamalib_set_button(button_t.BTN_MIDDLE, btn_state_t.BTN_STATE_PRESSED);
+                }
+                else if (e.keyCode == 39) //right arrow
+                {
+                    tamalib_set_button(button_t.BTN_RIGHT, btn_state_t.BTN_STATE_PRESSED);
+                }
+                
+                //debugging
+                if (e.keyCode == 32) //space
+                {
+                    tamalib_step(); //do one step
+                }
+                else if (e.keyCode == 27) //escape
+                {
+                    STEPS_PER_DELAY = STEPS_PER_DELAY == COPY_STEPS_PER_DELAY ? 0 : COPY_STEPS_PER_DELAY; //toggle pause
+                }
+            };
+            
+            document.onkeyup = function (e) { //not working?
+                e = e || window.event;
+                if (e.keyCode == 37) //left arrow
+                {
+                    tamalib_set_button(button_t.BTN_LEFT, btn_state_t.BTN_STATE_RELEASED);
+                }
+                else if (e.keyCode == 40) //down arrow
+                {
+                    tamalib_set_button(button_t.BTN_MIDDLE, btn_state_t.BTN_STATE_RELEASED);
+                }
+                else if (e.keyCode == 39) //right arrow
+                {
+                    tamalib_set_button(button_t.BTN_RIGHT, btn_state_t.BTN_STATE_RELEASED);
+                }
+            };
+            
+            function myLoop() {
+                //tamalib_mainloop();   
+                for (let i = 0; i < STEPS_PER_DELAY; i++) //TODO figure out how much to get an exact value
+                {
+                    tamalib_step();
+                } 
+                setTimeout(myLoop, 4);
+            }
+            
+            function setState(stateStr) {
+                // in some cases you may want to handle screen caching yourself
+                cpu_init_from_state(my_program, JSON.parse(stateStr), NULL, 1000000);
+            }
+            
+            function getState() {
+                let state = JSON.stringify(tamalib_get_state());
+                console.log(state);
+            }
+            
+            tamalib_register_hal(hal_t);
+            tamalib_init(my_program, NULL, 1000000);
+            myLoop();            
+        </script>
+    </body>
+</html>
+
