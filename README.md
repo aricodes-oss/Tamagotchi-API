@@ -19,11 +19,12 @@ Then replace the `[URL HERE]` with a raw url to a Tamagotchi P1 ROM in usigned_1
 docker run -e PORT=5000 -e PASTE_URL=[URL HERE] -p 5000:5000 tamagotchi-api
 ```
 
-Or to run in the background and automatic restart if server restarts. Note: No states are saved upon restarts! (However if your PTE is running in the foreground while your server restarts it shouldn't be an issue).
-
+Or to run in the background and automatic restart if server restarts: 
 ```
 docker run -d --restart unless-stopped -e PORT=5000 -e PASTE_URL=[URL HERE] -p 5000:5000 tamagotchi-api
 ```
+Note: No states are saved upon restarts! (However if your PTE is running in the foreground while your server restarts it shouldn't be an issue).
+
 
 This will run the server on `http://localhost:5000`
 
