@@ -173,6 +173,9 @@ class state_t {
         this.interrupts = null;
 
         this.memory = null;
+
+		this.selected_icon = null;
+		this.showing_attention_icon = null;
     }
 }
 
@@ -365,6 +368,9 @@ function cpu_get_state() {
     cpu_state.interrupts = interrupts;
 
     cpu_state.memory = memory;
+	cpu_state.selected_icon = selected_icon;
+	cpu_state.showing_attention_icon = showing_attention_icon;
+	
     return cpu_state;
 }
 

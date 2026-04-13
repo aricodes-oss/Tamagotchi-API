@@ -7,6 +7,9 @@ var log_level_t = {
   LOG_CPU: (0x1 << 3),
 };
 
+var showing_attention_icon = false;
+var selected_icon = -1;
+
 /* The Hardware Abstraction Layer
  * NOTE: This structure acts as an abstraction layer between TamaLIB and the OS/SDK.
  * All pointers MUST be implemented, but some implementations can be left empty.
@@ -66,6 +69,21 @@ var hal_t = {
     },
     set_lcd_icon: (icon, val) => {
         // Implement this function
+        if (icon === 7)
+        {
+            showing_attention_icon = val;
+        }
+        else
+        {
+            if (!val && selected_icon == icon)
+            {
+            selected_icon = -1;
+            }
+            else if (val)
+            {
+            selected_icon = icon;
+            }
+        }
     },
 
     /* Sound related functions
