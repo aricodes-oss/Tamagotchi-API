@@ -1,8 +1,8 @@
 # Tamagotchi API
 Background service that runs a [TamaLib-JS](https://github.com/StefanBauwens/tamalib-js) instance, and can get and set the state with a REST API.
-I created this with the intention for it to be used for the Pebble Tamagotchi Emulator (PTE).
+I created this with the intention for it to be used for the Tamagotchi Emulator 4 Pebble (TE4P).
 
-When the PTE closes on the Pebble it sends it state to this service, which then runs the emulator from this point onwards, effectively running the Tamagotchi in the background while the Pebble APP is closed. When the Pebble app reopens it fetches the new state from this server and continues from there. The cycle repeats when the app closes again.
+When TE4P closes on the Pebble it sends it state to this service, which then runs the emulator from this point onwards, effectively running the Tamagotchi in the background while the Pebble APP is closed. When the Pebble app reopens it fetches the new state from this server and continues from there. The cycle repeats when the app closes again.
 
 ## Run with Docker
 Download this repository.
@@ -23,7 +23,7 @@ Or to run in the background and automatic restart if server restarts:
 ```
 docker run -d --restart unless-stopped -e PORT=5000 -e PASTE_URL=[URL HERE] -p 5000:5000 tamagotchi-api
 ```
-Note: No states are saved upon restarts! (However if your PTE is running in the foreground while your server restarts it shouldn't be an issue).
+Note: No states are saved upon restarts! (However if your TE4P is running in the foreground while your server restarts it shouldn't be an issue).
 
 
 This will run the server on `http://localhost:5000`
