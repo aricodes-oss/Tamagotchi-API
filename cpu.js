@@ -370,7 +370,7 @@ function cpu_get_state() {
     cpu_state.memory = memory;
 	cpu_state.selected_icon = selected_icon;
 	cpu_state.showing_attention_icon = showing_attention_icon;
-	
+
     return cpu_state;
 }
 
@@ -396,6 +396,10 @@ function cpu_set_state(state) {
     interrupts = state.interrupts;
     
     memory = state.memory;
+
+	// set so that if we quickly send state back the icons will still be correct
+	selected_icon = state.selected_icon;
+	showing_attention_icon = state.showing_attention_icon;
 
 	// helps button reset properly after loading state
 	hw_set_button(button_t.BTN_LEFT, btn_state_t.BTN_STATE_RELEASED);
