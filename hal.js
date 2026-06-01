@@ -1,3 +1,6 @@
+var E0C6S46_SUPPORT						= true;
+var E0C6S48_SUPPORT						= false;
+
 const NULL = 0;
 
 var log_level_t = {

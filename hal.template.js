@@ -5,6 +5,7 @@ const log_level_t = {
   LOG_INFO: (0x1 << 1),
   LOG_MEMORY: (0x1 << 2),
   LOG_CPU: (0x1 << 3),
+  LOG_INT: (0x1 << 4),
 };
 
 /* The Hardware Abstraction Layer

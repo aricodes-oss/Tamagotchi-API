@@ -4,16 +4,41 @@ function NumToHex(hexNum, length)
 }
 
 //cpu.h
-const MEMORY_SIZE                           = 4096;
+const MEMORY_SIZE                           = 4096; // 4096 x 4 bits
  
-const MEM_RAM_ADDR 		                    = 0x000;
-const MEM_RAM_SIZE		                    = 0x280;
-const MEM_DISPLAY1_ADDR	                    = 0xE00;
-const MEM_DISPLAY1_SIZE	                    = 0x050;
-const MEM_DISPLAY2_ADDR	                    = 0xE80;
-const MEM_DISPLAY2_SIZE	                    = 0x050;
-const MEM_IO_ADDR		                    = 0xF00;
-const MEM_IO_SIZE		                    = 0x080;
+let MEM_RAM_ADDR 		                    = 0x000;
+let MEM_RAM_SIZE		                    = 0x300;
+let MEM_DISPLAY1_ADDR	                    = 0xE00;
+let MEM_DISPLAY1_SIZE	                    = 0x066;
+let MEM_DISPLAY2_ADDR	                    = 0xE80;
+let MEM_DISPLAY2_SIZE	                    = 0x066;
+let MEM_IO_ADDR		                    	= 0xF00;
+let MEM_IO_SIZE		                    	= 0x080;
+
+if (E0C6S48_SUPPORT) {
+	/* E0C6S48 (compatible with E0C6S46) */
+	MEM_RAM_ADDR							= 0x000;
+	MEM_RAM_SIZE							= 0x300; // 768 x 4 bits of RAM
+	MEM_DISPLAY1_ADDR						= 0xE00;
+	MEM_DISPLAY1_SIZE						= 0x066; // 102 x 4 bits of RAM
+	MEM_DISPLAY2_ADDR						= 0xE80;
+	MEM_DISPLAY2_SIZE						= 0x066; // 102 x 4 bits of RAM
+	MEM_IO_ADDR								= 0xF00;
+	MEM_IO_SIZE								= 0x080;
+} else if (E0C6S46_SUPPORT) {
+	/* E0C6S46 only */
+	MEM_RAM_ADDR							= 0x000;
+	MEM_RAM_SIZE							= 0x280; // 640 x 4 bits of RAM
+	MEM_DISPLAY1_ADDR						= 0xE00;
+	MEM_DISPLAY1_SIZE						= 0x050; // 80 x 4 bits of RAM
+	MEM_DISPLAY2_ADDR						= 0xE80;
+	MEM_DISPLAY2_SIZE						= 0x050; // 80 x 4 bits of RAM
+	MEM_IO_ADDR								= 0xF00;
+	MEM_IO_SIZE								= 0x080;
+} else {
+	console.log("ERROR: Support for at least one CPU needs to be defined !");
+}
+
 
 /* Asign this value to true if you want to reduce the footprint of the memory buffer from 4096 u4_t (most likely bytes)
  * to 464 u8_t (bytes for sure), while increasing slightly the number of operations needed to read/write from/to it.
@@ -162,7 +187,14 @@ class state_t {
         this.flags = null;
 
         this.tick_counter = null;
-        this.clk_timer_timestamp = null;
+		this.clk_timer_2hz_timestamp = null;
+		this.clk_timer_4hz_timestamp = null;
+		this.clk_timer_8hz_timestamp = null;
+		this.clk_timer_16hz_timestamp = null;
+		this.clk_timer_32hz_timestamp = null;
+		this.clk_timer_64hz_timestamp = null;
+		this.clk_timer_128hz_timestamp = null;
+		this.clk_timer_256hz_timestamp = null;
         this.prog_timer_timestamp = null;
         this.prog_timer_enabled = null;
         this.prog_timer_data = null;
@@ -172,18 +204,26 @@ class state_t {
 
         this.interrupts = null;
 
-        this.memory = null;
+		this.cpu_halted = null;
 
-		this.selected_icon = null;
-		this.showing_attention_icon = null;
+        this.memory = null;
     }
 }
 
 //cpu.c
 const TICK_FREQUENCY                        = 32768; // Hz
 
-const TIMER_1HZ_PERIOD                      = 32768; // in ticks
-const TIMER_256HZ_PERIOD                    = 128; // in ticks
+const OSC1_FREQUENCY						= TICK_FREQUENCY; // Hz
+const OSC3_FREQUENCY						= 1000000; // Hz
+
+const TIMER_2HZ_PERIOD						= (TICK_FREQUENCY/2); // in ticks
+const TIMER_4HZ_PERIOD						= (TICK_FREQUENCY/4); // in ticks
+const TIMER_8HZ_PERIOD						= (TICK_FREQUENCY/8); // in ticks
+const TIMER_16HZ_PERIOD						= (TICK_FREQUENCY/16); // in ticks
+const TIMER_32HZ_PERIOD						= (TICK_FREQUENCY/32); // in ticks
+const TIMER_64HZ_PERIOD						= (TICK_FREQUENCY/64); // in ticks
+const TIMER_128HZ_PERIOD					= (TICK_FREQUENCY/128); // in ticks
+const TIMER_256HZ_PERIOD					= (TICK_FREQUENCY/256); // in ticks
 
 const MASK_4B                               = 0xF00;
 const MASK_6B                               = 0xFC0;
@@ -247,13 +287,28 @@ const REG_PROG_INT_MASKS                    = 0xF12;
 const REG_SERIAL_INT_MASKS                  = 0xF13;
 const REG_K00_K03_INT_MASKS                 = 0xF14;
 const REG_K10_K13_INT_MASKS                 = 0xF15;
+const REG_CLOCK_TIMER_DATA_1				= 0xF20;
+const REG_CLOCK_TIMER_DATA_2				= 0xF21;
+const REG_SW_TIMER_DATA_L					= 0xF22;
+const REG_SW_TIMER_DATA_H					= 0xF23;
 const REG_PROG_TIMER_DATA_L                 = 0xF24;
 const REG_PROG_TIMER_DATA_H                 = 0xF25;
 const REG_PROG_TIMER_RELOAD_DATA_L          = 0xF26;
 const REG_PROG_TIMER_RELOAD_DATA_H          = 0xF27;
+const REG_SERIAL_IF_DATA_L					= 0xF30;
+const REG_SERIAL_IF_DATA_H					= 0xF31;
 const REG_K00_K03_INPUT_PORT                = 0xF40;
+const REG_K00_K03_INPUT_RELATION			= 0xF41;
 const REG_K10_K13_INPUT_PORT                = 0xF42;
-const REG_K40_K43_BZ_OUTPUT_PORT            = 0xF54;
+const REG_R00_R03_OUTPUT_PORT				= 0xF50;
+const REG_R10_R13_OUTPUT_PORT				= 0xF51;
+const REG_R20_R23_OUTPUT_PORT				= 0xF52;
+const REG_R30_R33_OUTPUT_PORT				= 0xF53;
+const REG_R40_R43_BZ_OUTPUT_PORT			= 0xF54;
+const REG_P00_P03_IO_PORT					= 0xF60;
+const REG_P10_P13_IO_PORT					= 0xF61;
+const REG_P20_P23_IO_PORT					= 0xF62;
+const REG_P30_P33_IO_PORT					= 0xF63;
 const REG_CPU_OSC3_CTRL                     = 0xF70;
 const REG_LCD_CTRL                          = 0xF71;
 const REG_LCD_CONTRAST                      = 0xF72;
@@ -264,6 +319,10 @@ const REG_CLK_WD_TIMER_CTRL                 = 0xF76;
 const REG_SW_TIMER_CTRL                     = 0xF77;
 const REG_PROG_TIMER_CTRL                   = 0xF78;
 const REG_PROG_TIMER_CLK_SEL                = 0xF79;
+const REG_SERIAL_IF_CLK_SEL					= 0xF7A;
+const REG_HIGH_IMPEDANCE_OUTPUT_CTRL		= 0xF7B;
+const REG_IO_CTRL							= 0xF7D;
+const REG_IO_PULLUP_CFG						= 0xF7E;
 
 const INPUT_PORT_NUM                        = 2;
 
@@ -317,11 +376,27 @@ let interrupts = [
     new interrupt_t(0x0, 0x0, 0, 0x02)  // Clock timer
 ];
 
+const interrupt_names = {
+	[int_slot_t.INT_PROG_TIMER_SLOT] 	: "INT_PROG_TIMER_SLOT",
+	[int_slot_t.INT_SERIAL_SLOT] 		: "INT_SERIAL_SLOT",
+	[int_slot_t.INT_K10_K13_SLOT] 		: "INT_K10_K13_SLOT",
+	[int_slot_t.INT_K00_K03_SLOT] 		: "INT_K00_K03_SLOT",
+	[int_slot_t.INT_STOPWATCH_SLOT] 	: "INT_STOPWATCH_SLOT",
+	[int_slot_t.INT_CLOCK_TIMER_SLOT] 	: "INT_CLOCK_TIMER_SLOT",
+};
+
 let g_breakpoints                           = NULL;
 
 let call_depth                              = 0;
 
-let clk_timer_timestamp                     = 0; // in ticks
+let clk_timer_2hz_timestamp 				= 0; // in ticks
+let clk_timer_4hz_timestamp 				= 0; // in ticks
+let clk_timer_8hz_timestamp 				= 0; // in ticks
+let clk_timer_16hz_timestamp 				= 0; // in ticks
+let clk_timer_32hz_timestamp 				= 0; // in ticks
+let clk_timer_64hz_timestamp 				= 0; // in ticks
+let clk_timer_128hz_timestamp 				= 0; // in ticks
+let clk_timer_256hz_timestamp 				= 0; // in ticks
 let prog_timer_timestamp                    = 0; // in ticks
 let prog_timer_enabled                      = 0;
 let prog_timer_data                         = 0;
@@ -329,8 +404,12 @@ let prog_timer_rld                          = 0;
 
 let tick_counter                            = 0;
 let ts_freq;
-let speed_ratio                             = 1;
+let speed_ratio                             = 0;
 let ref_ts;
+
+let cpu_halted								= 0;
+let cpu_frequency 							= OSC1_FREQUENCY; // in hz
+let scaled_cycle_accumulator 				= 0;
 
 let cpu_state = new state_t();
 
@@ -357,7 +436,14 @@ function cpu_get_state() {
     cpu_state.flags = flags;
 
     cpu_state.tick_counter = tick_counter;
-    cpu_state.clk_timer_timestamp = clk_timer_timestamp;
+	cpu_state.clk_timer_2hz_timestamp = clk_timer_2hz_timestamp;
+	cpu_state.clk_timer_4hz_timestamp = clk_timer_4hz_timestamp;
+	cpu_state.clk_timer_8hz_timestamp = clk_timer_8hz_timestamp;
+	cpu_state.clk_timer_16hz_timestamp = clk_timer_16hz_timestamp;
+	cpu_state.clk_timer_32hz_timestamp = clk_timer_32hz_timestamp;
+	cpu_state.clk_timer_64hz_timestamp = clk_timer_64hz_timestamp;
+	cpu_state.clk_timer_128hz_timestamp = clk_timer_128hz_timestamp;
+	cpu_state.clk_timer_256hz_timestamp = clk_timer_256hz_timestamp;
     cpu_state.prog_timer_timestamp = prog_timer_timestamp;
     cpu_state.prog_timer_enabled = prog_timer_enabled;
     cpu_state.prog_timer_data = prog_timer_data;
@@ -368,9 +454,6 @@ function cpu_get_state() {
     cpu_state.interrupts = interrupts;
 
     cpu_state.memory = memory;
-	cpu_state.selected_icon = selected_icon;
-	cpu_state.showing_attention_icon = showing_attention_icon;
-
     return cpu_state;
 }
 
@@ -385,7 +468,14 @@ function cpu_set_state(state) {
     flags = state.flags;
     
     tick_counter = state.tick_counter;
-    clk_timer_timestamp = state.clk_timer_timestamp;
+	clk_timer_2hz_timestamp = state.clk_timer_2hz_timestamp;
+	clk_timer_4hz_timestamp = state.clk_timer_4hz_timestamp;
+	clk_timer_8hz_timestamp = state.clk_timer_8hz_timestamp;
+	clk_timer_16hz_timestamp = state.clk_timer_16hz_timestamp;
+	clk_timer_32hz_timestamp = state.clk_timer_32hz_timestamp;
+	clk_timer_64hz_timestamp = state.clk_timer_64hz_timestamp;
+	clk_timer_128hz_timestamp = state.clk_timer_128hz_timestamp;
+	clk_timer_256hz_timestamp = state.clk_timer_256hz_timestamp;
     prog_timer_timestamp = state.prog_timer_timestamp;
     prog_timer_enabled = state.prog_timer_enabled;
     prog_timer_data = state.prog_timer_data;
@@ -394,17 +484,10 @@ function cpu_set_state(state) {
     call_depth = state.call_depth;
     
     interrupts = state.interrupts;
+
+	halted = state.halted;
     
     memory = state.memory;
-
-	// set so that if we quickly send state back the icons will still be correct
-	selected_icon = state.selected_icon;
-	showing_attention_icon = state.showing_attention_icon;
-
-	// helps button reset properly after loading state
-	hw_set_button(button_t.BTN_LEFT, btn_state_t.BTN_STATE_RELEASED);
-	hw_set_button(button_t.BTN_MIDDLE, btn_state_t.BTN_STATE_RELEASED);
-	hw_set_button(button_t.BTN_RIGHT, btn_state_t.BTN_STATE_RELEASED);
 }
 
 function cpu_get_depth() {
@@ -422,21 +505,29 @@ function generate_interrupt(slot, bit) {
 }
 
 function cpu_set_input_pin(pin, state) {
-    /* Set the I/O */
-    inputs[pin & 0x4].states = (inputs[pin & 0x4].states & ~(0x1 << (pin & 0x3))) | (state << (pin & 0x3));
+	let old_state = (inputs[pin & 0x4].states >> (pin & 0x3)) & 0x1;
 
-    /* Trigger the interrupt (TODO: handle relation register) */
-    if (state == pin_state_t.PIN_STATE_LOW) {
+    /* Trigger the interrupt if the state changed */
+    if (state != old_state) {
         switch ((pin & 0x4) >> 2) {
             case 0:
-                generate_interrupt(int_slot_t.INT_K00_K03_SLOT, pin & 0x3);
+                /* Active HIGH/LOW depending on the relation register */
+				if (state != ((GET_IO_MEMORY(memory, REG_K00_K03_INPUT_RELATION) >> (pin & 0x3)) & 0x1)) {
+					generate_interrupt(int_slot_t.INT_K00_K03_SLOT, pin & 0x3);
+				}
                 break;
 
             case 1:
-                generate_interrupt(int_slot_t.INT_K10_K13_SLOT, pin & 0x3);
+                /* Active LOW */
+				if (state == PIN_STATE_LOW) {
+					generate_interrupt(int_slot_t.INT_K10_K13_SLOT, pin & 0x3);
+				}
                 break;
         }
     }
+	
+	/* Set the I/O */
+	inputs[pin & 0x4].states = (inputs[pin & 0x4].states & ~(0x1 << (pin & 0x3))) | (state << (pin & 0x3));
 }
 
 function cpu_sync_ref_timestamp() {
@@ -507,6 +598,14 @@ function get_io(n) {
 			/* Input (K10-K13) interrupt masks */
 			return interrupts[int_slot_t.INT_K10_K13_SLOT].mask_reg;
 
+		case REG_CLOCK_TIMER_DATA_1:
+			/* Clock timer data (16-128Hz) */
+			return GET_IO_MEMORY(memory, n);
+
+		case REG_CLOCK_TIMER_DATA_2:
+			/* Clock timer data (1-8Hz) */
+			return GET_IO_MEMORY(memory, n);
+
 		case REG_PROG_TIMER_DATA_L:
 			/* Prog timer data (low) */
 			return prog_timer_data & 0xF;
@@ -527,11 +626,15 @@ function get_io(n) {
 			/* Input port (K00-K03) */
 			return inputs[0].states;
 
+		case REG_K00_K03_INPUT_RELATION:
+			/* Input relation register (K00-K03) */
+			return GET_IO_MEMORY(memory, n);
+
 		case REG_K10_K13_INPUT_PORT:
 			/* Input port (K10-K13) */
 			return inputs[1].states;
 
-		case REG_K40_K43_BZ_OUTPUT_PORT:
+		case REG_R40_R43_BZ_OUTPUT_PORT:
 			/* Output port (R40-R43) */
 			return GET_IO_MEMORY(memory, n);
 
@@ -587,7 +690,6 @@ function set_io(n, v) {
 	switch (n) {
 		case REG_CLOCK_INT_MASKS:
 			/* Clock timer interrupt masks */
-			/* Assume 1Hz timer INT enabled (0x8) */
 			interrupts[int_slot_t.INT_CLOCK_TIMER_SLOT].mask_reg = v;
 			break;
 
@@ -621,6 +723,16 @@ function set_io(n, v) {
 			interrupts[int_slot_t.INT_K10_K13_SLOT].mask_reg = v;
 			break;
 
+		case REG_CLOCK_TIMER_DATA_1:
+			/* Write not allowed */
+			/* Clock timer data (16-128Hz) */
+			break;
+
+		case REG_CLOCK_TIMER_DATA_2:
+			/* Write not allowed */
+			/* Clock timer data (1-8Hz) */
+			break;
+
 		case REG_PROG_TIMER_RELOAD_DATA_L:
 			/* Prog timer reload data (low) */
 			prog_timer_rld = v | (prog_timer_rld & 0xF0);
@@ -636,7 +748,11 @@ function set_io(n, v) {
 			/* Write not allowed */
 			break;
 
-		case REG_K40_K43_BZ_OUTPUT_PORT:
+		case REG_K00_K03_INPUT_RELATION:
+			/* Input relation register (K00-K03) */
+			break;
+
+		case REG_R40_R43_BZ_OUTPUT_PORT:
 			/* Output port (R40-R43) */
 			//g_hal->log(LOG_INFO, "Output/Buzzer: 0x%X\n", v);
 			hw_enable_buzzer(!(v & 0x8));
@@ -644,7 +760,19 @@ function set_io(n, v) {
 
 		case REG_CPU_OSC3_CTRL:
 			/* CPU/OSC3 clocks switch, CPU voltage switch */
-			/* Assume 32,768 OSC1 selected, OSC3 off, battery >= 3,1V (0x1) */
+			/* Do not care about OSC3 state nor operating voltage */
+			if ((v & 0x8) && cpu_frequency != OSC3_FREQUENCY) {
+				/* OSC3 */
+				cpu_frequency = OSC3_FREQUENCY;
+				scaled_cycle_accumulator = 0;
+				//g_hal->log(LOG_INFO, "Switch to OSC3\n");
+			}
+			if (!(v & 0x8) && cpu_frequency != OSC1_FREQUENCY) {
+				/* OSC1 */
+				cpu_frequency = OSC1_FREQUENCY;
+				scaled_cycle_accumulator = 0;
+				//g_hal->log(LOG_INFO, "Switch to OSC1\n");
+			}
 			break;
 
 		case REG_LCD_CTRL:
@@ -789,7 +917,7 @@ function cpu_refresh_hw() {
         { addr: MEM_DISPLAY1_ADDR, size: MEM_DISPLAY1_SIZE },   // Display Memory 1
         { addr: MEM_DISPLAY2_ADDR, size: MEM_DISPLAY2_SIZE },   // Display Memory 2
         { addr: REG_BUZZER_CTRL1, size: 1 },                    // Buzzer frequency
-        { addr: REG_K40_K43_BZ_OUTPUT_PORT, size: 1 },          // Buzzer enabled
+        { addr: REG_R40_R43_BZ_OUTPUT_PORT, size: 1 },          // Buzzer enabled
         { addr: 0, size: 0 },                                   // end of list
     ];
 
@@ -878,9 +1006,9 @@ function op_jpba_cb(arg0, arg1) {
 
 function op_call_cb(arg0, arg1) {
 	pc = (pc + 1) & 0x1FFF; // This does not actually change the PC register
-	SET_M(sp - 1, PCP());
-	SET_M(sp - 2, PCSH());
-	SET_M(sp - 3, PCSL());
+	SET_M((sp - 1) & 0xFF, PCP());
+	SET_M((sp - 2) & 0xFF, PCSH());
+	SET_M((sp - 3) & 0xFF, PCSL());
 	sp = (sp - 3) & 0xFF;
 	next_pc = TO_PC(PCB(), NPP(), arg0);
 	call_depth++;
@@ -888,34 +1016,40 @@ function op_call_cb(arg0, arg1) {
 
 function op_calz_cb(arg0, arg1) {
 	pc = (pc + 1) & 0x1FFF; // This does not actually change the PC register
-	SET_M(sp - 1, PCP());
-	SET_M(sp - 2, PCSH());
-	SET_M(sp - 3, PCSL());
+	SET_M((sp - 1) & 0xFF, PCP());
+	SET_M((sp - 2) & 0xFF, PCSH());
+	SET_M((sp - 3) & 0xFF, PCSL());
 	sp = (sp - 3) & 0xFF;
 	next_pc = TO_PC(PCB(), 0, arg0);
 	call_depth++;
 }
 
 function op_ret_cb(arg0, arg1) {
-	next_pc = M(sp) | (M(sp + 1) << 4) | (M(sp + 2) << 8) | (PCB() << 12);
+	next_pc = M(sp) | (M((sp + 1) & 0xFF) << 4) | (M((sp + 2) & 0xFF) << 8) | (PCB() << 12);
 	sp = (sp + 3) & 0xFF;
-	call_depth--;
+	if (call_depth > 0) {
+		call_depth--;
+	}
 }
 
 function op_rets_cb(arg0, arg1) {
-	next_pc = M(sp) | (M(sp + 1) << 4) | (M(sp + 2) << 8) | (PCB() << 12);
+	next_pc = M(sp) | (M((sp + 1) & 0xFF) << 4) | (M((sp + 2) & 0xFF) << 8) | (PCB() << 12);
 	sp = (sp + 3) & 0xFF;
-	next_pc = (pc + 1) & 0x1FFF;
-	call_depth--;
+	next_pc = (next_pc + 1) & 0x1FFF;
+	if (call_depth > 0) {
+		call_depth--;
+	}
 }
 
 function op_retd_cb(arg0, arg1) {
-	next_pc = M(sp) | (M(sp + 1) << 4) | (M(sp + 2) << 8) | (PCB() << 12);
+	next_pc = M(sp) | (M((sp + 1) & 0xFF) << 4) | (M((sp + 2) & 0xFF) << 8) | (PCB() << 12);
 	sp = (sp + 3) & 0xFF;
 	SET_M(x, arg0 & 0xF);
-	SET_M(x + 1, (arg0 >> 4) & 0xF);
+	SET_M(((x + 1) & 0xFF) | (XP() << 8), (arg0 >> 4) & 0xF);
 	x = ((x + 2) & 0xFF) | (XP() << 8);
-	call_depth--;
+	if (call_depth > 0) {
+		call_depth--;
+	}
 }
 
 function op_nop5_cb(arg0, arg1) {
@@ -925,7 +1059,7 @@ function op_nop7_cb(arg0, arg1) {
 }
 
 function op_halt_cb(arg0, arg1) {
-    g_hal.halt();
+	cpu_halted = 1;
 }
 
 function op_inc_x_cb(arg0, arg1) {
@@ -1094,7 +1228,7 @@ function op_ldpy_r_cb(arg0, arg1) {
 
 function op_lbpx_cb(arg0, arg1) {
 	SET_M(x, arg0 & 0xF);
-	SET_M(x + 1, (arg0 >> 4) & 0xF);
+	SET_M(((x + 1) & 0xFF) | (XP() << 8), (arg0 >> 4) & 0xF);
 	x = ((x + 2) & 0xFF) | (XP() << 8);
 }
 
@@ -1555,18 +1689,18 @@ const ops = [
 	new op_t(`INC  Y #0x%02X            `, 0xEF0, MASK_12B, 0, 0    , 5 , op_inc_y_cb), // INC_Y
 	new op_t(`LD   X #0x%02X            `, 0xB00, MASK_4B , 0, 0    , 5 , op_ld_x_cb), // LD_X
 	new op_t(`LD   Y #0x%02X            `, 0x800, MASK_4B , 0, 0    , 5 , op_ld_y_cb), // LD_Y
-	new op_t(`LD   XP R(#0x%02X)        `, 0xE80, MASK_10B, 0, 0    , 5 , op_ld_xp_r_cb), // LD_XP_R
-	new op_t(`LD   XH R(#0x%02X)        `, 0xE84, MASK_10B, 0, 0    , 5 , op_ld_xh_r_cb), // LD_XH_R
-	new op_t(`LD   XL R(#0x%02X)        `, 0xE88, MASK_10B, 0, 0    , 5 , op_ld_xl_r_cb), // LD_XL_R
-	new op_t(`LD   YP R(#0x%02X)        `, 0xE90, MASK_10B, 0, 0    , 5 , op_ld_yp_r_cb), // LD_YP_R
-	new op_t(`LD   YH R(#0x%02X)        `, 0xE94, MASK_10B, 0, 0    , 5 , op_ld_yh_r_cb), // LD_YH_R
-	new op_t(`LD   YL R(#0x%02X)        `, 0xE98, MASK_10B, 0, 0    , 5 , op_ld_yl_r_cb), // LD_YL_R
-	new op_t(`LD   R(#0x%02X) XP        `, 0xEA0, MASK_10B, 0, 0    , 5 , op_ld_r_xp_cb), // LD_R_XP
-	new op_t(`LD   R(#0x%02X) XH        `, 0xEA4, MASK_10B, 0, 0    , 5 , op_ld_r_xh_cb), // LD_R_XH
-	new op_t(`LD   R(#0x%02X) XL        `, 0xEA8, MASK_10B, 0, 0    , 5 , op_ld_r_xl_cb), // LD_R_XL
-	new op_t(`LD   R(#0x%02X) YP        `, 0xEB0, MASK_10B, 0, 0    , 5 , op_ld_r_yp_cb), // LD_R_YP
-	new op_t(`LD   R(#0x%02X) YH        `, 0xEB4, MASK_10B, 0, 0    , 5 , op_ld_r_yh_cb), // LD_R_YH
-	new op_t(`LD   R(#0x%02X) YL        `, 0xEB8, MASK_10B, 0, 0    , 5 , op_ld_r_yl_cb), // LD_R_YL
+	new op_t(`LD   XP R(%X)		     	`, 0xE80, MASK_10B, 0, 0    , 5 , op_ld_xp_r_cb), // LD_XP_R
+	new op_t(`LD   XH R(%X)		        `, 0xE84, MASK_10B, 0, 0    , 5 , op_ld_xh_r_cb), // LD_XH_R
+	new op_t(`LD   XL R(%X)		        `, 0xE88, MASK_10B, 0, 0    , 5 , op_ld_xl_r_cb), // LD_XL_R
+	new op_t(`LD   YP R(%X)		        `, 0xE90, MASK_10B, 0, 0    , 5 , op_ld_yp_r_cb), // LD_YP_R
+	new op_t(`LD   YH R(%X)		        `, 0xE94, MASK_10B, 0, 0    , 5 , op_ld_yh_r_cb), // LD_YH_R
+	new op_t(`LD   YL R(%X)		        `, 0xE98, MASK_10B, 0, 0    , 5 , op_ld_yl_r_cb), // LD_YL_R
+	new op_t(`LD   R(%X) XP		        `, 0xEA0, MASK_10B, 0, 0    , 5 , op_ld_r_xp_cb), // LD_R_XP
+	new op_t(`LD   R(%X) XH		        `, 0xEA4, MASK_10B, 0, 0    , 5 , op_ld_r_xh_cb), // LD_R_XH
+	new op_t(`LD   R(%X) XL		        `, 0xEA8, MASK_10B, 0, 0    , 5 , op_ld_r_xl_cb), // LD_R_XL
+	new op_t(`LD   R(%X) YP		        `, 0xEB0, MASK_10B, 0, 0    , 5 , op_ld_r_yp_cb), // LD_R_YP
+	new op_t(`LD   R(%X) YH		        `, 0xEB4, MASK_10B, 0, 0    , 5 , op_ld_r_yh_cb), // LD_R_YH
+	new op_t(`LD   R(%X) YL		        `, 0xEB8, MASK_10B, 0, 0    , 5 , op_ld_r_yl_cb), // LD_R_YL
 	new op_t(`ADC  XH #0x%02X           `, 0xA00, MASK_8B , 0, 0    , 7 , op_adc_xh_cb), // ADC_XH
 	new op_t(`ADC  XL #0x%02X           `, 0xA10, MASK_8B , 0, 0    , 7 , op_adc_xl_cb), // ADC_XL
 	new op_t(`ADC  YH #0x%02X           `, 0xA20, MASK_8B , 0, 0    , 7 , op_adc_yh_cb), // ADC_YH
@@ -1575,16 +1709,16 @@ const ops = [
 	new op_t(`CP   XL #0x%02X           `, 0xA50, MASK_8B , 0, 0    , 7 , op_cp_xl_cb), // CP_XL
 	new op_t(`CP   YH #0x%02X           `, 0xA60, MASK_8B , 0, 0    , 7 , op_cp_yh_cb), // CP_YH
 	new op_t(`CP   YL #0x%02X           `, 0xA70, MASK_8B , 0, 0    , 7 , op_cp_yl_cb), // CP_YL
-	new op_t(`LD   R(#0x%02X) #0x%02X   `, 0xE00, MASK_6B , 4, 0x030, 5 , op_ld_r_i_cb), // LD_R_I
-	new op_t(`LD   R(#0x%02X) Q(#0x%02X)`, 0xEC0, MASK_8B , 2, 0x00C, 5 , op_ld_r_q_cb), // LD_R_Q
+	new op_t(`LD   R(%X) #0x%02X		`, 0xE00, MASK_6B , 4, 0x030, 5 , op_ld_r_i_cb), // LD_R_I
+	new op_t(`LD   R(%X) Q(%X)			`, 0xEC0, MASK_8B , 2, 0x00C, 5 , op_ld_r_q_cb), // LD_R_Q
 	new op_t(`LD   A M(#0x%02X)         `, 0xFA0, MASK_8B , 0, 0    , 5 , op_ld_a_mn_cb), // LD_A_MN
 	new op_t(`LD   B M(#0x%02X)         `, 0xFB0, MASK_8B , 0, 0    , 5 , op_ld_b_mn_cb), // LD_B_MN
 	new op_t(`LD   M(#0x%02X) A         `, 0xF80, MASK_8B , 0, 0    , 5 , op_ld_mn_a_cb), // LD_MN_A
 	new op_t(`LD   M(#0x%02X) B         `, 0xF90, MASK_8B , 0, 0    , 5 , op_ld_mn_b_cb), // LD_MN_B
 	new op_t(`LDPX MX #0x%02X           `, 0xE60, MASK_8B , 0, 0    , 5 , op_ldpx_mx_cb), // LDPX_MX
-	new op_t(`LDPX R(#0x%02X) Q(#0x%02X)`, 0xEE0, MASK_8B , 2, 0x00C, 5 , op_ldpx_r_cb), // LDPX_R
+	new op_t(`LDPX R(%X) Q(%X)			`, 0xEE0, MASK_8B , 2, 0x00C, 5 , op_ldpx_r_cb), // LDPX_R
 	new op_t(`LDPY MY #0x%02X           `, 0xE70, MASK_8B , 0, 0    , 5 , op_ldpy_my_cb), // LDPY_MY
-	new op_t(`LDPY R(#0x%02X) Q(#0x%02X)`, 0xEF0, MASK_8B , 2, 0x00C, 5 , op_ldpy_r_cb), // LDPY_R
+	new op_t(`LDPY R(%X) Q(%X)			`, 0xEF0, MASK_8B , 2, 0x00C, 5 , op_ldpy_r_cb), // LDPY_R
 	new op_t(`LBPX #0x%02X              `, 0x900, MASK_4B , 0, 0    , 5 , op_lbpx_cb), // LBPX
 	new op_t(`SET  #0x%02X              `, 0xF40, MASK_8B , 0, 0    , 7 , op_set_cb), // SET
 	new op_t(`RST  #0x%02X              `, 0xF50, MASK_8B , 0, 0    , 7 , op_rst_cb), // RST
@@ -1598,7 +1732,7 @@ const ops = [
 	new op_t(`DI                        `, 0xF57, MASK_12B, 0, 0    , 7 , op_di_cb), // DI
 	new op_t(`INC  SP                   `, 0xFDB, MASK_12B, 0, 0    , 5 , op_inc_sp_cb), // INC_SP
 	new op_t(`DEC  SP                   `, 0xFCB, MASK_12B, 0, 0    , 5 , op_dec_sp_cb), // DEC_SP
-	new op_t(`PUSH R(#0x%02X)           `, 0xFC0, MASK_10B, 0, 0    , 5 , op_push_r_cb), // PUSH_R
+	new op_t(`PUSH R(%X)	           	`, 0xFC0, MASK_10B, 0, 0    , 5 , op_push_r_cb), // PUSH_R
 	new op_t(`PUSH XP                   `, 0xFC4, MASK_12B, 0, 0    , 5 , op_push_xp_cb), // PUSH_XP
 	new op_t(`PUSH XH                   `, 0xFC5, MASK_12B, 0, 0    , 5 , op_push_xh_cb), // PUSH_XH
 	new op_t(`PUSH XL                   `, 0xFC6, MASK_12B, 0, 0    , 5 , op_push_xl_cb), // PUSH_XL
@@ -1606,7 +1740,7 @@ const ops = [
 	new op_t(`PUSH YH                   `, 0xFC8, MASK_12B, 0, 0    , 5 , op_push_yh_cb), // PUSH_YH
 	new op_t(`PUSH YL                   `, 0xFC9, MASK_12B, 0, 0    , 5 , op_push_yl_cb), // PUSH_YL
 	new op_t(`PUSH F                    `, 0xFCA, MASK_12B, 0, 0    , 5 , op_push_f_cb), // PUSH_F
-	new op_t(`POP  R(#0x%02X)           `, 0xFD0, MASK_10B, 0, 0    , 5 , op_pop_r_cb), // POP_R
+	new op_t(`POP  R(%X)				`, 0xFD0, MASK_10B, 0, 0    , 5 , op_pop_r_cb), // POP_R
 	new op_t(`POP  XP                   `, 0xFD4, MASK_12B, 0, 0    , 5 , op_pop_xp_cb), // POP_XP
 	new op_t(`POP  XH                   `, 0xFD5, MASK_12B, 0, 0    , 5 , op_pop_xh_cb), // POP_XH
 	new op_t(`POP  XL                   `, 0xFD6, MASK_12B, 0, 0    , 5 , op_pop_xl_cb), // POP_XL
@@ -1614,51 +1748,61 @@ const ops = [
 	new op_t(`POP  YH                   `, 0xFD8, MASK_12B, 0, 0    , 5 , op_pop_yh_cb), // POP_YH
 	new op_t(`POP  YL                   `, 0xFD9, MASK_12B, 0, 0    , 5 , op_pop_yl_cb), // POP_YL
 	new op_t(`POP  F                    `, 0xFDA, MASK_12B, 0, 0    , 5 , op_pop_f_cb), // POP_F
-	new op_t(`LD   SPH R(#0x%02X)       `, 0xFE0, MASK_10B, 0, 0    , 5 , op_ld_sph_r_cb), // LD_SPH_R
-	new op_t(`LD   SPL R(#0x%02X)       `, 0xFF0, MASK_10B, 0, 0    , 5 , op_ld_spl_r_cb), // LD_SPL_R
-	new op_t(`LD   R(#0x%02X) SPH       `, 0xFE4, MASK_10B, 0, 0    , 5 , op_ld_r_sph_cb), // LD_R_SPH
-	new op_t(`LD   R(#0x%02X) SPL       `, 0xFF4, MASK_10B, 0, 0    , 5 , op_ld_r_spl_cb), // LD_R_SPL
-	new op_t(`ADD  R(#0x%02X) #0x%02X   `, 0xC00, MASK_6B , 4, 0x030, 7 , op_add_r_i_cb), // ADD_R_I
-	new op_t(`ADD  R(#0x%02X) Q(#0x%02X)`, 0xA80, MASK_8B , 2, 0x00C, 7 , op_add_r_q_cb), // ADD_R_Q
-	new op_t(`ADC  R(#0x%02X) #0x%02X   `, 0xC40, MASK_6B , 4, 0x030, 7 , op_adc_r_i_cb), // ADC_R_I
-	new op_t(`ADC  R(#0x%02X) Q(#0x%02X)`, 0xA90, MASK_8B , 2, 0x00C, 7 , op_adc_r_q_cb), // ADC_R_Q
-	new op_t(`SUB  R(#0x%02X) Q(#0x%02X)`, 0xAA0, MASK_8B , 2, 0x00C, 7 , op_sub_cb), // SUB
-	new op_t(`SBC  R(#0x%02X) #0x%02X   `, 0xB40, MASK_6B , 4, 0x030, 7 , op_sbc_r_i_cb), // SBC_R_I
-	new op_t(`SBC  R(#0x%02X) Q(#0x%02X)`, 0xAB0, MASK_8B , 2, 0x00C, 7 , op_sbc_r_q_cb), // SBC_R_Q
-	new op_t(`AND  R(#0x%02X) #0x%02X   `, 0xC80, MASK_6B , 4, 0x030, 7 , op_and_r_i_cb), // AND_R_I
-	new op_t(`AND  R(#0x%02X) Q(#0x%02X)`, 0xAC0, MASK_8B , 2, 0x00C, 7 , op_and_r_q_cb), // AND_R_Q
-	new op_t(`OR   R(#0x%02X) #0x%02X   `, 0xCC0, MASK_6B , 4, 0x030, 7 , op_or_r_i_cb), // OR_R_I
-	new op_t(`OR   R(#0x%02X) Q(#0x%02X)`, 0xAD0, MASK_8B , 2, 0x00C, 7 , op_or_r_q_cb), // OR_R_Q
-	new op_t(`XOR  R(#0x%02X) #0x%02X   `, 0xD00, MASK_6B , 4, 0x030, 7 , op_xor_r_i_cb), // XOR_R_I
-	new op_t(`XOR  R(#0x%02X) Q(#0x%02X)`, 0xAE0, MASK_8B , 2, 0x00C, 7 , op_xor_r_q_cb), // XOR_R_Q
-	new op_t(`CP   R(#0x%02X) #0x%02X   `, 0xDC0, MASK_6B , 4, 0x030, 7 , op_cp_r_i_cb), // CP_R_I
-	new op_t(`CP   R(#0x%02X) Q(#0x%02X)`, 0xF00, MASK_8B , 2, 0x00C, 7 , op_cp_r_q_cb), // CP_R_Q
-	new op_t(`FAN  R(#0x%02X) #0x%02X   `, 0xD80, MASK_6B , 4, 0x030, 7 , op_fan_r_i_cb), // FAN_R_I
-	new op_t(`FAN  R(#0x%02X) Q(#0x%02X)`, 0xF10, MASK_8B , 2, 0x00C, 7 , op_fan_r_q_cb), // FAN_R_Q
-	new op_t(`RLC  R(#0x%02X)           `, 0xAF0, MASK_8B , 0, 0    , 7 , op_rlc_cb), // RLC
-	new op_t(`RRC  R(#0x%02X)           `, 0xE8C, MASK_10B, 0, 0    , 5 , op_rrc_cb), // RRC
+	new op_t(`LD   SPH R(%X)    		`, 0xFE0, MASK_10B, 0, 0    , 5 , op_ld_sph_r_cb), // LD_SPH_R
+	new op_t(`LD   SPL R(%X)    		`, 0xFF0, MASK_10B, 0, 0    , 5 , op_ld_spl_r_cb), // LD_SPL_R
+	new op_t(`LD   R(%X) SPH    		`, 0xFE4, MASK_10B, 0, 0    , 5 , op_ld_r_sph_cb), // LD_R_SPH
+	new op_t(`LD   R(%X) SPL    		`, 0xFF4, MASK_10B, 0, 0    , 5 , op_ld_r_spl_cb), // LD_R_SPL
+	new op_t(`ADD  R(%X) #0x%02X		`, 0xC00, MASK_6B , 4, 0x030, 7 , op_add_r_i_cb), // ADD_R_I
+	new op_t(`ADD  R(%X) Q(%X)  		`, 0xA80, MASK_8B , 2, 0x00C, 7 , op_add_r_q_cb), // ADD_R_Q
+	new op_t(`ADC  R(%X) #0x%02X		`, 0xC40, MASK_6B , 4, 0x030, 7 , op_adc_r_i_cb), // ADC_R_I
+	new op_t(`ADC  R(%X) Q(%X)  		`, 0xA90, MASK_8B , 2, 0x00C, 7 , op_adc_r_q_cb), // ADC_R_Q
+	new op_t(`SUB  R(%X) Q(%X)  		`, 0xAA0, MASK_8B , 2, 0x00C, 7 , op_sub_cb), // SUB
+	new op_t(`SBC  R(%X) #0x%02X		`, 0xD40, MASK_6B , 4, 0x030, 7 , op_sbc_r_i_cb), // SBC_R_I
+	new op_t(`SBC  R(%X) Q(%X)  		`, 0xAB0, MASK_8B , 2, 0x00C, 7 , op_sbc_r_q_cb), // SBC_R_Q
+	new op_t(`AND  R(%X) #0x%02X		`, 0xC80, MASK_6B , 4, 0x030, 7 , op_and_r_i_cb), // AND_R_I
+	new op_t(`AND  R(%X) Q(%X)  		`, 0xAC0, MASK_8B , 2, 0x00C, 7 , op_and_r_q_cb), // AND_R_Q
+	new op_t(`OR   R(%X) #0x%02X		`, 0xCC0, MASK_6B , 4, 0x030, 7 , op_or_r_i_cb), // OR_R_I
+	new op_t(`OR   R(%X) Q(%X)  		`, 0xAD0, MASK_8B , 2, 0x00C, 7 , op_or_r_q_cb), // OR_R_Q
+	new op_t(`XOR  R(%X) #0x%02X		`, 0xD00, MASK_6B , 4, 0x030, 7 , op_xor_r_i_cb), // XOR_R_I
+	new op_t(`XOR  R(%X) Q(%X)  		`, 0xAE0, MASK_8B , 2, 0x00C, 7 , op_xor_r_q_cb), // XOR_R_Q
+	new op_t(`CP   R(%X) #0x%02X		`, 0xDC0, MASK_6B , 4, 0x030, 7 , op_cp_r_i_cb), // CP_R_I
+	new op_t(`CP   R(%X) Q(%X)  		`, 0xF00, MASK_8B , 2, 0x00C, 7 , op_cp_r_q_cb), // CP_R_Q
+	new op_t(`FAN  R(%X) #0x%02X		`, 0xD80, MASK_6B , 4, 0x030, 7 , op_fan_r_i_cb), // FAN_R_I
+	new op_t(`FAN  R(%X) Q(%X)  		`, 0xF10, MASK_8B , 2, 0x00C, 7 , op_fan_r_q_cb), // FAN_R_Q
+	new op_t(`RLC  R(%X)        		`, 0xAF0, MASK_8B , 0, 0    , 7 , op_rlc_cb), // RLC
+	new op_t(`RRC  R(%X)        		`, 0xE8C, MASK_10B, 0, 0    , 5 , op_rrc_cb), // RRC
 	new op_t(`INC  M(#0x%02X)           `, 0xF60, MASK_8B , 0, 0    , 7 , op_inc_mn_cb), // INC_MN
 	new op_t(`DEC  M(#0x%02X)           `, 0xF70, MASK_8B , 0, 0    , 7 , op_dec_mn_cb), // DEC_MN
-	new op_t(`ACPX R(#0x%02X)           `, 0xF28, MASK_10B, 0, 0    , 7 , op_acpx_cb), // ACPX
-	new op_t(`ACPY R(#0x%02X)           `, 0xF2C, MASK_10B, 0, 0    , 7 , op_acpy_cb), // ACPY
-	new op_t(`SCPX R(#0x%02X)           `, 0xF38, MASK_10B, 0, 0    , 7 , op_scpx_cb), // SCPX
-	new op_t(`SCPY R(#0x%02X)           `, 0xF3C, MASK_10B, 0, 0    , 7 , op_scpy_cb), // SCPY
-	new op_t(`NOT  R(#0x%02X)           `, 0xD0F, 0xFCF   , 4, 0    , 7 , op_not_cb), // NOT
+	new op_t(`ACPX R(%X)	           	`, 0xF28, MASK_10B, 0, 0    , 7 , op_acpx_cb), // ACPX
+	new op_t(`ACPY R(%X)	           	`, 0xF2C, MASK_10B, 0, 0    , 7 , op_acpy_cb), // ACPY
+	new op_t(`SCPX R(%X)	           	`, 0xF38, MASK_10B, 0, 0    , 7 , op_scpx_cb), // SCPX
+	new op_t(`SCPY R(%X)	           	`, 0xF3C, MASK_10B, 0, 0    , 7 , op_scpy_cb), // SCPY
+	new op_t(`NOT  R(%X)	           	`, 0xD0F, 0xFCF   , 4, 0    , 7 , op_not_cb), // NOT
 
 	new op_t(NULL, 0, 0, 0, 0, 0, NULL)
 ];
 
 function wait_for_cycles(since, cycles) {
 	let deadline;
+	let ticks_pending;
 
-	tick_counter += cycles;
+	/* The tick counter always works at TICK_FREQUENCY,
+	 * while the CPU runs at cpu_frequency
+	 */
+	scaled_cycle_accumulator += cycles * TICK_FREQUENCY;
+	ticks_pending = scaled_cycle_accumulator/cpu_frequency;
+
+	if (ticks_pending > 0) {
+		tick_counter += ticks_pending;
+		scaled_cycle_accumulator -= ticks_pending * cpu_frequency;
+	}
 
 	if (speed_ratio == 0) {
 		/* Emulation will be as fast as possible */
 		return g_hal.get_timestamp();
 	}
 
-	deadline = since + (cycles * ts_freq)/(TICK_FREQUENCY * speed_ratio);
+	deadline = since + (cycles * ts_freq)/(cpu_frequency * speed_ratio);
 	g_hal.sleep_until(deadline);
 
 	return deadline;
@@ -1671,17 +1815,20 @@ function process_interrupts() {
 	for (i = 0; i < int_slot_t.INT_SLOT_NUM; i++) {
 		if (interrupts[i].triggered) {
 			//printf("IT %u !\n", i);
-			SET_M(sp - 1, PCP());
-			SET_M(sp - 2, PCSH());
-			SET_M(sp - 3, PCSL());
+			g_hal.log(log_level_t.LOG_INT, "Interrupt %s (%u) triggered\n", interrupt_names[i], i);
+			SET_M((sp - 1) & 0xFF, PCP());
+			SET_M((sp - 2) & 0xFF, PCSH());
+			SET_M((sp - 3) & 0xFF, PCSL());
 			sp = (sp - 3) & 0xFF;
 			CLEAR_I();
 			np = TO_NP(NBP(), 1);
 			pc = TO_PC(PCB(), 1, interrupts[i].vector);
 			call_depth++;
+			cpu_halted = 0;
 
 			ref_ts = wait_for_cycles(ref_ts, 12);
 			interrupts[i].triggered = 0;
+			return;
 		}
 	}
 }
@@ -1696,8 +1843,13 @@ function print_state(op_num, op, addr) {
     g_hal.log(log_level_t.LOG_CPU, NumToHex(addr, 4) + ": ");
     //g_hal.log(log_level_t.LOG_CPU, "0x%04X: ", addr);
 
-	for (i = 0; i < call_depth; i++) {
-        g_hal.log(log_level_t.LOG_CPU, "  ");
+	if (call_depth < 100) {
+		for (i = 0; i < call_depth; i++) {
+			g_hal.log(log_level_t.LOG_CPU, "  ");
+		}
+	} else {
+		/* Something went wrong with the call depth */
+		g_hal.log(log_level_t.LOG_CPU, "<<< ");
 	}
 
 	if (ops[op_num].mask_arg0 != 0) {
@@ -1724,6 +1876,114 @@ function print_state(op_num, op, addr) {
 	//g_hal.log(log_level_t.LOG_CPU, " - PC = 0x%04X, SP = 0x%02X, NP = 0x%02X, X = 0x%03X, Y = 0x%03X, A = 0x%X, B = 0x%X, F = 0x%X\n", pc, sp, np, x, y, a, b, flags);
 }
 
+function handle_timers()
+{
+	/* Handle timers using the internal tick counter */
+	if (tick_counter - clk_timer_2hz_timestamp >= TIMER_2HZ_PERIOD) {
+		do {
+			clk_timer_2hz_timestamp += TIMER_2HZ_PERIOD;
+		} while (tick_counter - clk_timer_2hz_timestamp >= TIMER_2HZ_PERIOD);
+
+		/* Update clock timer data for 1Hz */
+		SET_IO_MEMORY(memory, REG_CLOCK_TIMER_DATA_2, GET_IO_MEMORY(memory, REG_CLOCK_TIMER_DATA_2) ^ (0x1 << 3));
+
+		/* Generate interrupt on falling edge only (1Hz) */
+		if (!((GET_IO_MEMORY(memory, REG_CLOCK_TIMER_DATA_2) >> 3) & 0x1 )) {
+			generate_interrupt(int_slot_t.INT_CLOCK_TIMER_SLOT, 3);
+		}
+	}
+
+	if (tick_counter - clk_timer_4hz_timestamp >= TIMER_4HZ_PERIOD) {
+		do {
+			clk_timer_4hz_timestamp += TIMER_4HZ_PERIOD;
+		} while (tick_counter - clk_timer_4hz_timestamp >= TIMER_4HZ_PERIOD);
+
+		/* Update clock timer data for 2Hz */
+		SET_IO_MEMORY(memory, REG_CLOCK_TIMER_DATA_2, GET_IO_MEMORY(memory, REG_CLOCK_TIMER_DATA_2) ^ (0x1 << 2));
+
+		/* Generate interrupt on falling edge only (2Hz) */
+		if (!((GET_IO_MEMORY(memory, REG_CLOCK_TIMER_DATA_2) >> 2) & 0x1 )) {
+			generate_interrupt(int_slot_t.INT_CLOCK_TIMER_SLOT, 2);
+		}
+	}
+
+	if (tick_counter - clk_timer_8hz_timestamp >= TIMER_8HZ_PERIOD) {
+		do {
+			clk_timer_8hz_timestamp += TIMER_8HZ_PERIOD;
+		} while (tick_counter - clk_timer_8hz_timestamp >= TIMER_8HZ_PERIOD);
+
+		/* Update clock timer data for 4Hz */
+		SET_IO_MEMORY(memory, REG_CLOCK_TIMER_DATA_2, GET_IO_MEMORY(memory, REG_CLOCK_TIMER_DATA_2) ^ (0x1 << 1));
+	}
+
+	if (tick_counter - clk_timer_16hz_timestamp >= TIMER_16HZ_PERIOD) {
+		do {
+			clk_timer_16hz_timestamp += TIMER_16HZ_PERIOD;
+		} while (tick_counter - clk_timer_16hz_timestamp >= TIMER_16HZ_PERIOD);
+
+		/* Update clock timer data for 8Hz */
+		SET_IO_MEMORY(memory, REG_CLOCK_TIMER_DATA_2, GET_IO_MEMORY(memory, REG_CLOCK_TIMER_DATA_2) ^ (0x1 << 0));
+
+		/* Generate interrupt on falling edge only (8Hz) */
+		if (!((GET_IO_MEMORY(memory, REG_CLOCK_TIMER_DATA_2) >>0) & 0x1 )) {
+			generate_interrupt(int_slot_t.INT_CLOCK_TIMER_SLOT, 1);
+		}
+	}
+
+	if (tick_counter - clk_timer_32hz_timestamp >= TIMER_32HZ_PERIOD) {
+		do {
+			clk_timer_32hz_timestamp += TIMER_32HZ_PERIOD;
+		} while (tick_counter - clk_timer_32hz_timestamp >= TIMER_32HZ_PERIOD);
+
+		/* Update clock timer data for 16Hz */
+		SET_IO_MEMORY(memory, REG_CLOCK_TIMER_DATA_1, GET_IO_MEMORY(memory, REG_CLOCK_TIMER_DATA_1) ^ (0x1 << 3));
+	}
+
+	if (tick_counter - clk_timer_64hz_timestamp >= TIMER_64HZ_PERIOD) {
+		do {
+			clk_timer_64hz_timestamp += TIMER_64HZ_PERIOD;
+		} while (tick_counter - clk_timer_64hz_timestamp >= TIMER_64HZ_PERIOD);
+
+		/* Update clock timer data for 32Hz */
+		SET_IO_MEMORY(memory, REG_CLOCK_TIMER_DATA_1, GET_IO_MEMORY(memory, REG_CLOCK_TIMER_DATA_1) ^ (0x1 << 2));
+
+		/* Generate interrupt on falling edge only (32Hz) */
+		if (!((GET_IO_MEMORY(memory, REG_CLOCK_TIMER_DATA_1) >> 2) & 0x1 )) {
+			generate_interrupt(int_slot_t.INT_CLOCK_TIMER_SLOT, 0);
+		}
+	}
+
+	if (tick_counter - clk_timer_128hz_timestamp >= TIMER_128HZ_PERIOD) {
+		do {
+			clk_timer_128hz_timestamp += TIMER_128HZ_PERIOD;
+		} while (tick_counter - clk_timer_128hz_timestamp >= TIMER_128HZ_PERIOD);
+
+		/* Update clock timer data for 64Hz */
+		SET_IO_MEMORY(memory, REG_CLOCK_TIMER_DATA_1, GET_IO_MEMORY(memory, REG_CLOCK_TIMER_DATA_1) ^ (0x1 << 1));
+	}
+
+	if (tick_counter - clk_timer_256hz_timestamp >= TIMER_256HZ_PERIOD) {
+		do {
+			clk_timer_256hz_timestamp += TIMER_256HZ_PERIOD;
+		} while (tick_counter - clk_timer_256hz_timestamp >= TIMER_256HZ_PERIOD);
+
+		/* Update clock timer data for 128Hz */
+		SET_IO_MEMORY(memory, REG_CLOCK_TIMER_DATA_1, GET_IO_MEMORY(memory, REG_CLOCK_TIMER_DATA_1) ^ (0x1 << 0));
+	}
+
+	if (prog_timer_enabled && tick_counter - prog_timer_timestamp >= TIMER_256HZ_PERIOD) {
+		do {
+			prog_timer_timestamp += TIMER_256HZ_PERIOD;
+			prog_timer_data--;
+
+			if (prog_timer_data == 0) {
+				prog_timer_data = prog_timer_rld;
+				generate_interrupt(int_slot_t.INT_PROG_TIMER_SLOT, 0);
+			}
+		} while (tick_counter - prog_timer_timestamp >= TIMER_256HZ_PERIOD);
+	}
+}
+
 function cpu_reset() {
 	let i;
 
@@ -1742,9 +2002,11 @@ function cpu_reset() {
 		memory[i] = 0;
 	}
 
-	SET_IO_MEMORY(memory, REG_K40_K43_BZ_OUTPUT_PORT, 0xF); // Output port (R40-R43)
+	SET_IO_MEMORY(memory, REG_R40_R43_BZ_OUTPUT_PORT, 0xF); // Output port (R40-R43)
 	SET_IO_MEMORY(memory, REG_LCD_CTRL, 0x8); // LCD control
-	/* TODO: Input relation register */
+	SET_IO_MEMORY(memory, REG_K00_K03_INPUT_RELATION, 0xF); // Active high
+
+	cpu_frequency = OSC1_FREQUENCY;
 
 	cpu_sync_ref_timestamp();
 }
@@ -1759,7 +2021,8 @@ function cpu_init(program, breakpoints, freq) {
 	return 0;
 }
 
-function cpu_init_from_state(program, state, breakpoints, freq) {
+//TODO Stefan: this function was removed in og TamaLIB. Check if it has been moved somewhere
+function cpu_init_from_state(program, state, breakpoints, freq) { 
     g_program = program;
     g_breakpoints = breakpoints;
     ts_freq = freq;
@@ -1780,80 +2043,69 @@ function cpu_step() {
 	let i;
 	let bp = g_breakpoints;
 
-	op = g_program[pc];
+	if (!cpu_halted) {
+		op = g_program[pc];
 
-	/* Lookup the OP code */
-    for (i = 0; ops[i].log != NULL; i++) {
-		if ((op & ops[i].mask) == ops[i].code) {
-			break;
-		}
-	}
-
-	if (ops[i].log == NULL) {
-        g_hal.log(log_level_t.LOG_ERROR, `Unknown op-code ${NumToHex(op, 0)} (pc = ${NumToHex(pc, 4)})\n`);
-        //g_hal.log(log_level_t.LOG_ERROR, "Unknown op-code 0x%X (pc = 0x%04X)\n", op, pc);
-		return 1;
-	}
-
-	next_pc = (pc + 1) & 0x1FFF;
-
-	/* Display the operation along with the current state of the processor */
-	print_state(i, op, pc);
-
-	/* Match the speed of the real processor
-	 * NOTE: For better accuracy, the final wait should happen here, however
-	 * the downside is that all interrupts will likely be delayed by one OP
-	 */
-	ref_ts = wait_for_cycles(ref_ts, previous_cycles);
-
-	/* Process the OP code */
-	if (ops[i].cb != NULL) {
-		if (ops[i].mask_arg0 != 0) {
-			/* Two arguments */
-			ops[i].cb((op & ops[i].mask_arg0) >> ops[i].shift_arg0, op & ~(ops[i].mask | ops[i].mask_arg0));
-		} else {
-			/* One arguments */
-			ops[i].cb((op & ~ops[i].mask) >> ops[i].shift_arg0, 0);
-		}
-	}
-
-	/* Prepare for the next instruction */
-	pc = next_pc;
-	previous_cycles = ops[i].cycles;
-
-	if (i > 0) {
-		/* OP code is not PSET, reset NP */
-		np = (pc >> 8) & 0x1F;
-	}
-
-	/* Handle timers using the internal tick counter */
-	if (tick_counter - clk_timer_timestamp >= TIMER_1HZ_PERIOD) {
-		do {
-			clk_timer_timestamp += TIMER_1HZ_PERIOD;
-		} while (tick_counter - clk_timer_timestamp >= TIMER_1HZ_PERIOD);
-
-		generate_interrupt(int_slot_t.INT_CLOCK_TIMER_SLOT, 3);
-	}
-
-	if (prog_timer_enabled && tick_counter - prog_timer_timestamp >= TIMER_256HZ_PERIOD) {
-		do {
-			prog_timer_timestamp += TIMER_256HZ_PERIOD;
-			prog_timer_data--;
-
-			if (prog_timer_data == 0) {
-				prog_timer_data = prog_timer_rld;
-                generate_interrupt(int_slot_t.INT_PROG_TIMER_SLOT, 0);
+		/* Lookup the OP code */
+		for (i = 0; ops[i].log != NULL; i++) {
+			if ((op & ops[i].mask) == ops[i].code) {
+				break;
 			}
-		} while (tick_counter - prog_timer_timestamp >= TIMER_256HZ_PERIOD);
+		}
+
+		if (ops[i].log == NULL) {
+			g_hal.log(log_level_t.LOG_ERROR, `Unknown op-code ${NumToHex(op, 0)} (pc = ${NumToHex(pc, 4)})\n`);
+			return 1;
+		}
+
+		next_pc = (pc + 1) & 0x1FFF;
+
+		/* Display the operation along with the current state of the processor */
+		print_state(i, op, pc);
+
+		/* Match the speed of the real processor
+		* NOTE: For better accuracy, the final wait should happen here, however
+		* the downside is that all interrupts will likely be delayed by one OP
+		*/
+		ref_ts = wait_for_cycles(ref_ts, previous_cycles);
+
+		/* Process the OP code */
+		if (ops[i].cb != NULL) {
+			if (ops[i].mask_arg0 != 0) {
+				/* Two arguments */
+				ops[i].cb((op & ops[i].mask_arg0) >> ops[i].shift_arg0, op & ~(ops[i].mask | ops[i].mask_arg0));
+			} else {
+				/* One arguments */
+				ops[i].cb((op & ~ops[i].mask) >> ops[i].shift_arg0, 0);
+			}
+		}
+
+		/* Prepare for the next instruction */
+		pc = next_pc;
+		previous_cycles = ops[i].cycles;
+
+		if (i != 0) {
+			/* OP code is not PSET, reset NP */
+			np = (pc >> 8) & 0x1F;
+		}
+	} else {
+		/* Wait at least once for the duration of a HALT and as long as required
+		 * (to increment the tick counter), but make sure there will be no wait once
+		 * the CPU is restarted
+		 */
+		ref_ts = wait_for_cycles(ref_ts, 5);
+		previous_cycles = 0;
 	}
+
+	handle_timers();
 
 	/* Check if there is any pending interrupt */
-	if (I() && i > 0) { // Do not process interrupts after a PSET operation
+	if (I() && i != 0 && i != 58) { // Do not process interrupts after a PSET or EI operation
 		process_interrupts();
 	}
 
 	/* Check if we could pause the execution */
-	while (bp != NULL) {
+	while (!cpu_halted && bp != NULL) {
         if (bp.addr == pc) {
 			return 1;
 		}

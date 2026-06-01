@@ -1,17 +1,19 @@
+/* VERSION 1.1 */
+
 const loadScripts = require('./loadScripts');
 const NULL = 0;
 
 class Emulator {
     constructor(program) {
         this.ctx = loadScripts([
+            './rom.js',
             './hal.js',
             './hw.js',
             './cpu.js',
-            './rom.js',
             './tamalib.js'
         ]);
 
-        this.program = this.ctx.my_program; //TODO load this from pastebin
+        this.program = this.ctx.my_program;
 
         this.STEPS_PER_DELAY = 30;
 

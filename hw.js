@@ -11,16 +11,41 @@ const btn_state_t = {
 const button_t = {
     BTN_LEFT: 0,
     BTN_MIDDLE: 1,
-	BTN_RIGHT: 2
+	BTN_RIGHT: 2,
+    BTN_TAP: 3
 };
 
-const seg_pos = [0, 1, 2, 3, 4, 5, 6, 7, 32, 8, 9, 10, 11, 12 ,13 ,14, 15, 33, 34, 35, 31, 30, 29, 28, 27, 26, 25, 24, 36, 23, 22, 21, 20, 19, 18, 17, 16, 37, 38, 39];
+const rom_type_t =  {
+    P1P2: 0xFA2,
+    ANGEL: 0xFC4,
+    DIGIMON: 0x587,
+    MOTHRA: 0x581
+}
+
+let rom_type = my_program[0]; // determine rom type based off first value in ROM
+
+/* SEG -> LCD mapping */
+let seg_pos = [];
+
+if (E0C6S48_SUPPORT) {
+    /* 51 segments */
+    if (rom_type == rom_type_t.DIGIMON) {
+        seg_pos = [32, 0, 1, 2, 3, 4, 5, 6, 7, 33, 34, 35, 8, 9, 10, 11, 12, 13, 14, 15, 31, 30, 29, 28, 27, 26, 25, 24, 36, 23, 22, 21, 20, 19, 18, 17, 16, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50];
+    } else { // angel, mothra
+        seg_pos = [0, 1, 2, 3, 4, 5, 6, 7, 32, 8, 9, 10, 11, 12 ,13 ,14, 15, 33, 34, 35, 31, 30, 29, 28, 27, 26, 25, 24, 36, 23, 22, 21, 20, 19, 18, 17, 16, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50];
+    }
+
+} else if (E0C6S46_SUPPORT) {
+    /* 40 segments */
+    seg_pos = [0, 1, 2, 3, 4, 5, 6, 7, 32, 8, 9, 10, 11, 12 ,13 ,14, 15, 33, 34, 35, 31, 30, 29, 28, 27, 26, 25, 24, 36, 23, 22, 21, 20, 19, 18, 17, 16, 37, 38, 39];
+}
 
 function hw_init() {
-    /* Buttons are active LOW */
+    /* Buttons/Tap sensor are active LOW */
     cpu_set_input_pin(pin_t.PIN_K00, pin_state_t.PIN_STATE_HIGH);
     cpu_set_input_pin(pin_t.PIN_K01, pin_state_t.PIN_STATE_HIGH);
     cpu_set_input_pin(pin_t.PIN_K02, pin_state_t.PIN_STATE_HIGH);
+    cpu_set_input_pin(pin_t.PIN_K03, pin_state_t.PIN_STATE_HIGH);
 
     return 0;
 }
@@ -28,9 +53,18 @@ function hw_init() {
 function hw_release() {
 }
 
+var seggers = {};
+var prvSeggers = {};
+
+
 function hw_set_lcd_pin(seg, com, val) {
+    //printf("   hw_set_lcd_pin: seg = %u, com = %u, val = %u\n", seg, com, val);
     if (seg_pos[seg] < LCD_WIDTH) {
-        g_hal.set_lcd_matrix(seg_pos[seg], com, val);
+        if (rom_type == rom_type_t.DIGIMON) {
+            g_hal.set_lcd_matrix((LCD_WIDTH - 1) - seg_pos[seg], (LCD_HEIGHT - 1) - com, val);
+        } else { // P1P2, angel, mothra
+            g_hal.set_lcd_matrix(seg_pos[seg], com, val);
+        }
     } else {
         /*
          * IC n -> seg-com|...
@@ -43,10 +77,88 @@ function hw_set_lcd_pin(seg, com, val) {
          * IC 6 -> 28-14|37-15|39-12
          * IC 7 -> 28-15|38-12|39-13
          */
-        if (seg == 8 && com < 4) {
-            g_hal.set_lcd_icon(com, val);
-        } else if (seg == 28 && com >= 12) {
-            g_hal.set_lcd_icon(com - 8, val);
+
+        if (seggers[seg] === undefined)
+        {
+            seggers[seg] = {};
+        }
+        seggers[seg][com] = val;
+        /*if (JSON.stringify(seggers) != JSON.stringify(prvSeggers))
+        {
+            console.log(seggers);
+            prvSeggers = JSON.parse(JSON.stringify(seggers));
+        }*/
+
+        if (rom_type == rom_type_t.DIGIMON) {
+            if (com == 0) {
+                switch(seg) {
+                    case 0:
+                        g_hal.set_lcd_icon(7, val);
+                        break; 
+                    case 9:
+                        g_hal.set_lcd_icon(6, val);
+                        break;
+                    case 10:
+                        g_hal.set_lcd_icon(5, val);
+                        break;
+                    case 11:
+                        g_hal.set_lcd_icon(4, val);
+                        break;
+                }
+            } else if (com == 15) {
+                switch(seg) {
+                    case 28:
+                        g_hal.set_lcd_icon(0, val);
+                        break; 
+                    case 37:
+                        g_hal.set_lcd_icon(1, val);
+                        break;
+                    case 38:
+                        g_hal.set_lcd_icon(2, val);
+                        break;
+                    case 39:
+                        g_hal.set_lcd_icon(3, val);
+                        break;
+                }
+            }
+        } else if (rom_type == rom_type_t.MOTHRA) {
+            if (com == 0) {
+                switch(seg) {
+                    case 8:
+                        g_hal.set_lcd_icon(0, val);
+                        break; 
+                    case 17:
+                        g_hal.set_lcd_icon(1, val);
+                        break;
+                    case 18:
+                        g_hal.set_lcd_icon(2, val);
+                        break;
+                    case 19:
+                        g_hal.set_lcd_icon(3, val);
+                        break;
+                }
+            } else if (com == 15) {
+                switch(seg) {
+                    case 28:
+                        g_hal.set_lcd_icon(7, val);
+                        break; 
+                    case 37:
+                        g_hal.set_lcd_icon(6, val);
+                        break;
+                    case 38:
+                        g_hal.set_lcd_icon(5, val);
+                        break;
+                    case 39:
+                        g_hal.set_lcd_icon(4, val);
+                        break;
+                }
+            }
+        } else {
+            if (seg == 8 && com < 4) {
+                g_hal.set_lcd_icon(com, val);
+            } else if (seg == 28 && com >= 12) {
+                g_hal.set_lcd_icon(com - 8, val);
+            }
         }
     }
 }
@@ -55,6 +167,10 @@ function hw_set_button(btn, state) {
     let pin_state = (state == btn_state_t.BTN_STATE_PRESSED) ? pin_state_t.PIN_STATE_LOW : pin_state_t.PIN_STATE_HIGH;
 
     switch (btn) {
+        case button_t.BTN_TAP:
+			cpu_set_input_pin(pin_t.PIN_K03, pin_state);
+			break;
+
         case button_t.BTN_LEFT:
             cpu_set_input_pin(pin_t.PIN_K02, pin_state);
             break;

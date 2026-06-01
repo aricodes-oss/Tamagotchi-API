@@ -4,6 +4,18 @@ I created this with the intention for it to be used for the [Tamagotchi Emulator
 
 When TE4P closes on the Pebble it sends it state to this service, which then runs the emulator from this point onwards, effectively running the Tamagotchi in the background while the Pebble APP is closed. When the Pebble app reopens it fetches the new state from this server and continues from there. The cycle repeats when the app closes again.
 
+## Version Info
+
+Version 1.1.
+
+- Updated to latest version of TamaLIB. This version is only compatible with Tamagotchi Emulator 4 Pebble 1.3.0 or higher.
+
+
+Version 1.0.
+
+- Compatible with Tamagotchi Emulator 4 Pebble 1.2.0 or lower. Please Upgrade.
+
+
 ## Run with Docker
 Download this repository.
 
