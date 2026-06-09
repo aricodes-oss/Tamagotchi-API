@@ -4,14 +4,14 @@ const loadScripts = require('./loadScripts');
 const NULL = 0;
 
 class Emulator {
-    constructor(program) {
+    // `romSource` is JS source that defines `var my_program = [ ... ];`
+    constructor(romSource) {
         this.ctx = loadScripts([
-            './rom.js',
             './hal.js',
             './hw.js',
             './cpu.js',
             './tamalib.js'
-        ]);
+        ], romSource);
 
         this.program = this.ctx.my_program;
 
