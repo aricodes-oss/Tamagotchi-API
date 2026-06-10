@@ -234,6 +234,16 @@ async function saveAllAsync() {
     );
 }
 
+// Recreate one pet's emulator from a persisted snapshot and (re)start its loop.
+// Shared by boot-time restoreAll and on-demand rehydration from shared storage.
+async function restoreSession(data) {
+    const session = await getOrCreateSession(data.pebbleId, data.pasteUrl);
+    stopLoop(session);
+    session.emu.setState(JSON.stringify(data.state));
+    startLoop(session);
+    return session;
+}
+
 // Reload pets persisted on a previous run, recreating their emulators and loops.
 async function restoreAll() {
     let files;
@@ -248,10 +258,7 @@ async function restoreAll() {
             .map(async (f) => {
                 try {
                     const data = JSON.parse(await fsp.readFile(path.join(PETS_DIR, f), 'utf-8'));
-                    const session = await getOrCreateSession(data.pebbleId, data.pasteUrl);
-                    stopLoop(session);
-                    session.emu.setState(JSON.stringify(data.state));
-                    startLoop(session);
+                    await restoreSession(data);
                     console.log(`Restored pet ${data.pebbleId}`);
                 } catch (err) {
                     console.error(`Failed to restore pet from ${f}:`, err.message);
@@ -265,6 +272,27 @@ function getSession(pebbleId) {
     const session = sessions.get(pebbleId);
     if (session) session.lastAccess = Date.now();
     return session;
+}
+
+// Like getSession, but if the pet isn't in this node's memory, try to rehydrate
+// it from shared storage. This is what lets sharded routing move a pet to a new
+// node (or recover an idle-evicted pet) without the client re-POSTing its save.
+// Returns null only if no save exists anywhere.
+async function getOrRestoreSession(pebbleId) {
+    const existing = getSession(pebbleId);
+    if (existing) return existing;
+
+    let data;
+    try {
+        data = JSON.parse(await fsp.readFile(petFile(pebbleId), 'utf-8'));
+    } catch {
+        return null; // no persisted save -> genuinely unknown pet
+    }
+
+    // A concurrent request may have restored it while we were reading the file;
+    // reuse that. Otherwise restore. restoreSession coalesces on the same id and
+    // just reloads the same snapshot, so a rare double-restore is harmless.
+    return getSession(pebbleId) || restoreSession(data);
 }
 
 // Get the user's emulator, creating it (and fetching its ROM) if needed. If the
@@ -320,6 +348,7 @@ setInterval(saveAllAsync, AUTOSAVE_INTERVAL_MS).unref();
 
 module.exports = {
     getSession,
+    getOrRestoreSession,
     getOrCreateSession,
     startLoop,
     stopLoop,

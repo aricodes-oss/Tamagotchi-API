@@ -17,11 +17,18 @@ function requirePebbleId(req, res) {
 }
 
 // --- GET state ---
-app.get('/state', (req, res) => {
+app.get('/state', async (req, res) => {
     const pebbleId = requirePebbleId(req, res);
     if (!pebbleId) return;
 
-    const session = manager.getSession(pebbleId);
+    let session;
+    try {
+        // Rehydrate from shared storage if this node doesn't already hold the pet
+        // in memory (e.g. sharded routing just moved it here, or it was evicted).
+        session = await manager.getOrRestoreSession(pebbleId);
+    } catch (err) {
+        return res.status(502).json({ error: `Could not restore pet: ${err.message}` });
+    }
     if (!session) {
         return res.status(404).json({ error: 'No emulator for this id. POST a state first.' });
     }
