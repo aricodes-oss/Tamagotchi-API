@@ -10,7 +10,14 @@ const path = require('path');
 const crypto = require('crypto');
 const Emulator = require('./emulator');
 
-const LOOP_INTERVAL_MS = 4;
+// The driver paces each emulator against its own virtual clock (emu.refTs(),
+// in microseconds). Each wake-up runs steps until the emulator is LOOKAHEAD_US
+// of virtual time ahead of real time, then sleeps for that gap so the event loop
+// is yielded between bursts. STEP_BUDGET caps work per wake-up so a pet that has
+// fallen far behind (or runs on the fast OSC3 clock) can't wedge the event loop;
+// it simply catches up over several wake-ups, or degrades by lagging if it can't.
+const LOOKAHEAD_US = 15000;
+const STEP_BUDGET = 100000;
 
 // Hard cap on concurrently running emulators so an unbounded stream of distinct
 // pebble ids can't exhaust CPU/memory/disk. Tune with MAX_SESSIONS.
@@ -124,23 +131,38 @@ function fetchRom(pasteUrl) {
 function startLoop(session) {
     if (session.loopInterval !== null) return;
     const emu = session.emu;
-    session.loopInterval = setInterval(() => {
+
+    // Re-anchor the virtual clock to now, so a freshly created or restored pet
+    // doesn't try to replay all the virtual time since it was last saved.
+    emu.syncClock();
+
+    const tick = () => {
         try {
-            for (let i = 0; i < emu.STEPS_PER_DELAY; i++) {
+            let steps = 0;
+            // Advance until the emulator is a small lookahead ahead of real time.
+            while (emu.refTs() - Date.now() * 1000 < LOOKAHEAD_US && steps < STEP_BUDGET) {
                 emu.step();
+                steps++;
             }
+            // Sleep until real time catches up to the virtual clock (yielding the
+            // event loop). If we exhausted the step budget we're behind, so the
+            // gap is <= 0 and we run again immediately.
+            const delayMs = Math.max(0, (emu.refTs() - Date.now() * 1000) / 1000);
+            session.loopInterval = setTimeout(tick, delayMs);
         } catch (err) {
             // A bad save (or otherwise broken state) must not crash the whole
             // process or spin forever throwing - stop just this pet's loop.
             console.error(`Emulator ${session.pebbleId} loop stopped:`, err.message);
             stopLoop(session);
         }
-    }, LOOP_INTERVAL_MS);
+    };
+
+    session.loopInterval = setTimeout(tick, 0);
 }
 
 function stopLoop(session) {
     if (session.loopInterval !== null) {
-        clearInterval(session.loopInterval);
+        clearTimeout(session.loopInterval);
         session.loopInterval = null;
     }
 }
